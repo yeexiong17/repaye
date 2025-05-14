@@ -1,10 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
-import { Star, MapPin, Clock, Phone, Calendar, Wallet } from 'lucide-react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { Star, MapPin, Clock, Phone, Calendar, Wallet, MessageSquare } from 'lucide-react';
+import { useWallet, useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
+import { PublicKey } from '@solana/web3.js';
 import dynamic from 'next/dynamic';
 import BookingModal from '../components/BookingModal';
 import { format } from 'date-fns';
+import { getProgram, getRestaurantPublicKey, findUserStatsPDA } from '../utils/program';
+import Header from '../components/Header';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
 
 // Dynamically import the wallet button component
 const WalletMultiButtonDynamic = dynamic(
@@ -117,43 +122,186 @@ const restaurants = [
   }
 ];
 
+// Replace the helper function with the imported one from utils/program
+// Create a helper for getting restaurant display name
+const getRestaurantDisplayName = (restaurantId: number): string => {
+  const publicKeyStr = getRestaurantPublicKey(restaurantId).toString();
+  return `Restaurant #${publicKeyStr.slice(0, 6)}`;
+};
+
 export default function RatingApp() {
   const [mounted, setMounted] = useState(false);
   const [showPhantomLink, setShowPhantomLink] = useState(false);
-  const { connected } = useWallet();
+  const { connection } = useConnection();
+  const wallet = useWallet();
+  const anchorWallet = useAnchorWallet();
+  const { connected, publicKey } = wallet;
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [selectedRestaurant, setSelectedRestaurant] = useState<typeof restaurants[0] | null>(null);
   const [openReviews, setOpenReviews] = useState<{ [id: number]: boolean }>({});
-  
+  const [isLoading, setIsLoading] = useState(false);
+  const [bookingInProgress, setBookingInProgress] = useState(false);
+  const [userData, setUserData] = useState<any>(null);
+  const [program, setProgram] = useState<any>(null);
+  const router = useRouter();
+
+  // Track if the program is initialized
+  const [programInitialized, setProgramInitialized] = useState(false);
+
   // Handle client-side mounting
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Check if Phantom wallet is installed
+  // Initialize Solana program when wallet connects
   useEffect(() => {
-    if (!mounted) return;
+    if (connected && publicKey && anchorWallet && connection) {
+      try {
+        // Make sure the wallet is fully initialized with a valid public key
+        if (!anchorWallet.publicKey) {
+          console.error("Wallet connected but publicKey is not available yet");
+          setProgramInitialized(false);
+          return;
+        }
 
-    const checkPhantomWallet = () => {
-      const isPhantomInstalled = window?.solana?.isPhantom;
-      setShowPhantomLink(!isPhantomInstalled);
-    };
-    
-    checkPhantomWallet();
-    window.addEventListener('load', checkPhantomWallet);
-    
-    return () => {
-      window.removeEventListener('load', checkPhantomWallet);
-    };
-  }, [mounted]);
+        const solanaProgram = getProgram(anchorWallet, connection);
+        setProgram(solanaProgram);
+        setProgramInitialized(!!solanaProgram);
 
-  const handleBooking = (restaurant: typeof restaurants[0]) => {
+        if (solanaProgram) {
+          console.log("Solana program initialized successfully");
+          getUserData(solanaProgram);
+        } else {
+          console.error("Failed to initialize Solana program");
+        }
+      } catch (error) {
+        console.error("Error initializing Solana program:", error);
+        setProgramInitialized(false);
+      }
+    } else {
+      setProgramInitialized(false);
+    }
+  }, [connected, publicKey, anchorWallet, connection]);
+
+  // Function to fetch user data from the blockchain
+  const getUserData = async (programInstance: any = program) => {
+    if (!publicKey || !connection || !programInstance) return;
+
+    setIsLoading(true);
+    try {
+      // Use the fetchUserData function from the program module
+      const { fetchUserData } = require('../utils/program');
+      const data = await fetchUserData(programInstance, connection, publicKey);
+
+      if (data) {
+        setUserData(data);
+        console.log("User data loaded from blockchain:", data);
+      } else {
+        // Initialize empty user data structure if nothing found on chain
+        setUserData({
+          userPublicKey: publicKey.toString(),
+          restaurants: {}
+        });
+        console.log("No existing user data found on blockchain");
+      }
+    } catch (error) {
+      console.error("Error loading user data from blockchain:", error);
+      // Set empty user data on error
+      setUserData({
+        userPublicKey: publicKey.toString(),
+        restaurants: {}
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Initialize user stats for a restaurant
+  const handleInitializeUserStats = async (restaurantId: number) => {
+    if (!publicKey || !program) return false;
+
+    setBookingInProgress(true);
+
+    try {
+      // Create a deterministic PublicKey from the restaurant ID
+      const restaurantPublicKey = getRestaurantPublicKey(restaurantId);
+      console.log(`Initializing stats for restaurant: ${restaurantPublicKey.toString()}`);
+
+      // Import the function from program module
+      const { initializeUserStats } = require('../utils/program');
+
+      // Call the function to initialize user stats
+      try {
+        const tx = await initializeUserStats(program, publicKey, restaurantPublicKey);
+        console.log("User stats initialized successfully:", tx);
+
+        // Refresh user data
+        await getUserData();
+
+        return true;
+      } catch (e) {
+        console.error("Specific error initializing user stats:", e);
+
+        // Check if this is an "already initialized" error (which is actually okay)
+        const errorMessage = e.toString();
+        if (errorMessage.includes("already in use") || errorMessage.includes("already initialized")) {
+          console.log("User stats already initialized, which is fine");
+          return true; // Still return success in this case
+        }
+
+        throw new Error(`Failed to initialize user stats: ${e.message || e}`);
+      }
+    } catch (error) {
+      console.error("Error initializing user stats:", error);
+      alert(`Error initializing user stats: ${error.message || "Unknown error"}`);
+      return false;
+    } finally {
+      setBookingInProgress(false);
+    }
+  };
+
+  const handleBooking = async (restaurant: typeof restaurants[0]) => {
     if (!connected) {
       alert('Please connect your wallet to make a booking');
       return;
     }
-    setSelectedRestaurant(restaurant);
-    setIsBookingModalOpen(true);
+
+    if (!programInitialized) {
+      alert('Solana program not initialized yet. Please wait a moment and try again.');
+      return;
+    }
+
+    try {
+      setBookingInProgress(true);
+
+      // Check if we need to initialize user stats first
+      if (publicKey) {
+        // Create a deterministic PublicKey from the restaurant ID
+        const restaurantIdString = `restaurant-${restaurant.id}`;
+        const restaurantIdBuffer = Buffer.from(restaurantIdString);
+        const restaurantPublicKey = new PublicKey(restaurantIdBuffer);
+        const restaurantKey = restaurantPublicKey.toBase58();
+
+        // If we don't have user data yet, or we don't have data for this restaurant,
+        // initialize user stats first
+        if (!userData || !userData.restaurants[restaurantKey]) {
+          console.log("Initializing user stats before booking");
+          const initialized = await handleInitializeUserStats(restaurant.id);
+          if (!initialized) {
+            console.error("Failed to initialize user stats");
+            return;
+          }
+        }
+      }
+
+      setSelectedRestaurant(restaurant);
+      setIsBookingModalOpen(true);
+    } catch (error) {
+      console.error("Error during booking process:", error);
+      alert(`Error during booking process: ${error.message || "Unknown error"}`);
+    } finally {
+      setBookingInProgress(false);
+    }
   };
 
   const handleConfirmBooking = (bookingDetails: {
@@ -165,12 +313,18 @@ export default function RatingApp() {
     totalPrice: number;
     transactionSignature?: string;
   }) => {
-    // Here you would typically send the booking details to your backend
+    // This is called after the booking is confirmed in the modal
     console.log('Booking confirmed:', {
       restaurant: selectedRestaurant?.name,
       ...bookingDetails,
     });
-    
+
+    // Update local state
+    if (bookingDetails.transactionSignature) {
+      // Refresh user data to show the new booking
+      getUserData();
+    }
+
     const message = [
       `Booking confirmed at ${selectedRestaurant?.name}`,
       `Date: ${format(bookingDetails.date, 'MMMM d, yyyy')}`,
@@ -178,20 +332,28 @@ export default function RatingApp() {
       `Guests: ${bookingDetails.guests}`,
       `Selected Dishes: ${bookingDetails.selectedDishes.join(', ')}`,
       `Total Price: $${bookingDetails.totalPrice.toFixed(2)}`,
-      bookingDetails.transactionSignature ? 
-        `Transaction: https://explorer.solana.com/tx/${bookingDetails.transactionSignature}` : 
+      bookingDetails.transactionSignature ?
+        `Transaction: https://explorer.solana.com/tx/${bookingDetails.transactionSignature}?cluster=devnet` :
         'No transaction signature'
     ].join('\n');
 
-    alert(message);
+    // Close the modal
     setIsBookingModalOpen(false);
     setSelectedRestaurant(null);
+
+    // Show a success message
+    alert(message);
   };
 
+  // If not mounted yet, don't render the page
+  if (!mounted) return null;
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="flex flex-col min-h-screen bg-gray-100">
       <Head>
-        <title>Restaurant Reviews - Solana</title>
+        <title>SolDine - Restaurant Booking & Rating</title>
+        <meta name="description" content="Book tables and rate restaurants on Solana" />
+        <link rel="icon" href="/favicon.ico" />
         <style jsx global>{`
           .wallet-adapter-button {
             background-color: transparent !important;
@@ -247,37 +409,12 @@ export default function RatingApp() {
         `}</style>
       </Head>
 
-      {/* Wallet Connection Section - Fixed in top right */}
-      <div className="fixed top-4 right-4 z-50">
-        {mounted && (
-          <div className="flex flex-col items-end gap-2">
-            <div className="relative">
-              <WalletMultiButtonDynamic />
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <Wallet className="w-5 h-5 text-gray-600" />
-              </div>
-            </div>
-            {showPhantomLink && (
-              <div className="text-right">
-                <p className="text-sm text-gray-600 mb-2">Don't have Phantom wallet?</p>
-                <a
-                  href="https://phantom.app/download"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                >
-                  Download Phantom Wallet
-                </a>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <Header />
 
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
+      {/* Main Content Area */}
+      <main className="flex-grow container mx-auto px-4 py-8">
         <h1 className="text-4xl font-bold text-gray-900 mb-8">Featured Restaurants</h1>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
           {restaurants.map((restaurant) => (
             <div key={restaurant.id} className="bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-shadow">
@@ -292,11 +429,11 @@ export default function RatingApp() {
                   <span className="font-semibold">{restaurant.rating}</span>
                 </div>
               </div>
-              
+
               <div className="p-6">
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">{restaurant.name}</h2>
                 <p className="text-gray-600 mb-4">{restaurant.description}</p>
-                
+
                 <div className="space-y-2 text-sm text-gray-500">
                   <div className="flex items-center gap-2">
                     <MapPin className="w-4 h-4" />
@@ -311,7 +448,7 @@ export default function RatingApp() {
                     <span>{restaurant.phone}</span>
                   </div>
                 </div>
-                
+
                 <div className="mt-4 flex items-center justify-between">
                   <span className="text-sm text-gray-500">{restaurant.reviews} reviews</span>
                   <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">
@@ -322,63 +459,25 @@ export default function RatingApp() {
                 <div className="mt-6 flex gap-2">
                   <button
                     onClick={() => handleBooking(restaurant)}
-                    className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700 transition-colors"
+                    disabled={bookingInProgress}
+                    className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
                     style={{ minWidth: 0 }}
                   >
                     <Calendar className="w-4 h-4" />
-                    {connected ? 'Book' : 'Connect'}
+                    {connected ? (bookingInProgress ? 'Processing...' : 'Book') : 'Connect'}
                   </button>
-                  <button
-                    onClick={() =>
-                      setOpenReviews((prev) => ({
-                        ...prev,
-                        [restaurant.id]: !prev[restaurant.id],
-                      }))
-                    }
-                    className="flex-1 flex items-center justify-center gap-2 bg-gray-200 text-gray-800 px-3 py-2 rounded-lg text-sm hover:bg-gray-300 transition-colors"
-                    style={{ minWidth: 0 }}
-                  >
-                    Reviews
-                  </button>
+                  <Link href={`/rating/${restaurant.id}`} passHref legacyBehavior>
+                    <a className="flex-1 flex items-center justify-center gap-2 bg-gray-200 text-gray-800 px-3 py-2 rounded-lg text-sm hover:bg-gray-300 transition-colors" style={{ minWidth: 0 }}>
+                      <MessageSquare className="w-4 h-4" />
+                      Rate / Reviews
+                    </a>
+                  </Link>
                 </div>
-
-                {openReviews[restaurant.id] && restaurant.individualReviews && restaurant.individualReviews.length > 0 && (
-                  <div className="mt-4">
-                    <h3 className="text-lg font-semibold mb-2 text-gray-800">Reviews</h3>
-                    <div className="space-y-3">
-                      {restaurant.individualReviews.slice(-2).reverse().map((review) => (
-                        <div key={review.id} className="bg-gray-50 rounded-lg p-3">
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
-                              <div className="flex">
-                                {[1, 2, 3, 4, 5].map((star) => (
-                                  <Star
-                                    key={star}
-                                    className={`w-4 h-4 ${
-                                      star <= review.rating
-                                        ? 'text-yellow-400 fill-yellow-400'
-                                        : 'text-gray-300'
-                                    }`}
-                                  />
-                                ))}
-                              </div>
-                              <span className="text-xs text-gray-500">{review.date}</span>
-                            </div>
-                            <span className="text-xs text-gray-400">
-                              {review.walletAddress.slice(0, 4)}...{review.walletAddress.slice(-4)}
-                            </span>
-                          </div>
-                          <p className="text-gray-700 text-sm">{review.comment}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </main>
 
       {/* Booking Modal */}
       {selectedRestaurant && (

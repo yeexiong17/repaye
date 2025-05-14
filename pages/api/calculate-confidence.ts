@@ -44,8 +44,9 @@ export default async function handler(
     }
 
     if (!process.env.OPENAI_API_KEY) {
-        console.error("OpenAI API key not configured.");
-        return res.status(500).json({ error: 'OpenAI API key not configured. Admin check needed.' });
+        console.error("OpenAI API key not configured. API route will use placeholder logic.");
+        // Fallback to placeholder if API key is missing, instead of hard erroring, 
+        // to allow testing placeholder flow easily.
     }
 
     try {
@@ -55,65 +56,96 @@ export default async function handler(
             visitCount,
         } = req.body as RequestData;
 
+        // Log received inputs
+        console.log("--- API /api/calculate-confidence --- INPUTS ---");
+        console.log("Received reviewText (first 50 chars):", reviewText.substring(0, 50));
+        console.log("Received starRating:", starRating, "(type:", typeof starRating, ")");
+        console.log("Received visitCount:", visitCount, "(type:", typeof visitCount, ")");
+
         if (!reviewText || starRating === undefined || visitCount === undefined) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
         if (starRating < 1 || starRating > 5) return res.status(400).json({ error: 'Invalid star rating' });
         if (visitCount < 0) return res.status(400).json({ error: 'Invalid visit count' });
 
-        const systemPrompt = `You are a sophisticated restaurant review confidence score calculator. 
-    Your task is to determine a 'confidence level' for a given review, on a scale of 1 to 10, where 1 is very low confidence and 10 is very high confidence. 
-    Consider factors like: review text detail and specificity, sentiment consistency with star rating, length of review, and user's visit count to the restaurant (higher visit count might indicate a more informed opinion). 
-    Based on your analysis, provide a single integer score between 1 and 10. Output only the integer score.`;
-
-        const userPrompt = `Analyze the following restaurant review data and provide a confidence score (1-10):
-    Review Text: "${reviewText}"
-    User's Overall Star Rating: ${starRating}/5
-    User's Visit Count to this Restaurant: ${visitCount}
-    
-    Confidence Score (1-10):`;
-
-        // console.log("Sending prompt to OpenAI:", userPrompt); // For debugging
-
-        const completion = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo", // Or use "gpt-4" if you have access and prefer it
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt },
-            ],
-            temperature: 0.3, // Lower temperature for more deterministic score output
-            max_tokens: 10,   // Expecting a short numerical answer
-        });
-
-        const aiResponse = completion.choices[0].message.content?.trim();
-        // console.log("Raw AI Response:", aiResponse); // For debugging
-
         let calculatedConfidenceLevel = 5; // Default fallback
 
-        if (aiResponse) {
-            const parsedScore = parseInt(aiResponse, 10);
-            if (!isNaN(parsedScore)) {
-                calculatedConfidenceLevel = Math.max(1, Math.min(10, parsedScore)); // Clamp between 1 and 10
-            } else {
-                console.warn("OpenAI did not return a valid number. Raw response:", aiResponse);
-                // Optionally, you could try a more advanced regex or string search if the model includes explanatory text
+        // If OpenAI API key is available, try to use OpenAI
+        if (process.env.OPENAI_API_KEY) {
+            console.log("--- Attempting OpenAI API Call ---");
+            const systemPrompt = `You are a sophisticated restaurant review confidence score calculator. 
+            Your task is to determine a 'confidence level' for a given review, on a scale of 1 to 10, where 1 is very low confidence and 10 is very high confidence. 
+            Consider factors like: review text detail and specificity, sentiment consistency with star rating, length of review, and user's visit count to the restaurant (higher visit count might indicate a more informed opinion). 
+            Based on your analysis, provide a single integer score between 1 and 10. Output only the integer score.`;
+
+            const userPrompt = `Analyze the following restaurant review data and provide a confidence score (1-10):
+            Review Text: "${reviewText}"
+            User's Overall Star Rating: ${starRating}/5
+            User's Visit Count to this Restaurant: ${visitCount}
+            
+            Confidence Score (1-10):`;
+
+            try {
+                const completion = await openai.chat.completions.create({
+                    model: "gpt-3.5-turbo",
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPrompt },
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 10,
+                });
+
+                const aiResponse = completion.choices[0].message.content?.trim();
+                console.log("Raw AI Response:", aiResponse);
+
+                if (aiResponse) {
+                    const parsedScore = parseInt(aiResponse, 10);
+                    if (!isNaN(parsedScore)) {
+                        calculatedConfidenceLevel = Math.max(1, Math.min(10, parsedScore));
+                        console.log("Score from AI (clamped):", calculatedConfidenceLevel);
+                    } else {
+                        console.warn("OpenAI did not return a valid number. Raw response:", aiResponse, "Using fallback score.");
+                    }
+                } else {
+                    console.warn("OpenAI returned an empty response. Using fallback score.");
+                }
+            } catch (aiError: any) {
+                console.error("Error calling OpenAI API:", aiError.message);
+                console.log("OpenAI call failed. Falling back to placeholder logic.");
+                // Fall through to placeholder if AI call fails
             }
-        } else {
-            console.warn("OpenAI returned an empty response.");
         }
-        console.log(calculatedConfidenceLevel);
+
+        // Fallback to placeholder logic if API key is missing OR if OpenAI call failed above
+        if (!process.env.OPENAI_API_KEY || calculatedConfidenceLevel === 5) { // The second condition means AI failed or returned a 5 itself or couldn't parse
+            console.log("--- Using Placeholder Calculation --- (Reason: No API Key or AI failed/defaulted)");
+            console.log("Input starRating:", starRating);
+            console.log("Input visitCount:", visitCount);
+            console.log("Input reviewText.trim() (length):", reviewText.trim().length);
+
+            let placeholderScore = starRating;
+            console.log("Initial placeholderScore (from starRating):", placeholderScore);
+
+            const visitContribution = getVisitFrequencyContribution(visitCount);
+            console.log("Visit Frequency Contribution:", visitContribution);
+            placeholderScore += visitContribution;
+            console.log("PlaceholderScore after visit contribution:", placeholderScore);
+
+            const lengthContribution = getTextLengthContribution(reviewText);
+            console.log("Text Length Contribution:", lengthContribution);
+            placeholderScore += lengthContribution;
+            console.log("PlaceholderScore after length contribution (raw total):", placeholderScore);
+
+            calculatedConfidenceLevel = Math.round(Math.max(1, Math.min(10, placeholderScore)));
+            console.log("Final Clamped Placeholder Confidence Level:", calculatedConfidenceLevel);
+        }
+
+        console.log("API final calculatedConfidenceLevel to be sent:", calculatedConfidenceLevel);
         res.status(200).json({ calculatedConfidenceLevel });
 
     } catch (err: any) {
-        console.error("Error calling OpenAI API or processing in /api/calculate-confidence:", err);
-        let errorMessage = 'Internal server error calling AI service.';
-        if (err.response) { // Axios-like error structure from OpenAI library
-            console.error('OpenAI API Error Status:', err.response.status);
-            console.error('OpenAI API Error Data:', err.response.data);
-            errorMessage = `OpenAI API Error: ${err.response.data?.error?.message || err.message}`;
-        } else if (err.message) {
-            errorMessage = err.message;
-        }
-        res.status(500).json({ error: errorMessage, debug: err });
+        console.error("Error in /api/calculate-confidence (outer try-catch):", err);
+        res.status(500).json({ error: err.message || 'Internal server error' });
     }
 } 

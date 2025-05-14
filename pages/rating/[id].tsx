@@ -303,6 +303,11 @@ export default function RatingPage() {
                             />
                           ))}
                         </div>
+                        {typeof review.confidenceLevel === 'number' && (
+                          <span className="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                            AI Confidence: {review.confidenceLevel}/10
+                          </span>
+                        )}
                       </div>
                     </div>
                     <p className="text-gray-700 mb-1 break-words">

@@ -1,0 +1,239 @@
+{
+    "version": "0.1.0",
+    "name": "restaurant_booking",
+    "instructions": [
+        {
+            "name": "initializeUserStats",
+            "accounts": [
+                {
+                    "name": "userStats",
+                    "isMut": true,
+                    "isSigner": false
+                },
+                {
+                    "name": "restaurant",
+                    "isMut": false,
+                    "isSigner": false
+                },
+                {
+                    "name": "user",
+                    "isMut": true,
+                    "isSigner": true
+                },
+                {
+                    "name": "systemProgram",
+                    "isMut": false,
+                    "isSigner": false
+                }
+            ],
+            "args": []
+        },
+        {
+            "name": "initializeDishStats",
+            "accounts": [
+                {
+                    "name": "dishStats",
+                    "isMut": true,
+                    "isSigner": false
+                },
+                {
+                    "name": "dish",
+                    "isMut": false,
+                    "isSigner": false
+                },
+                {
+                    "name": "user",
+                    "isMut": true,
+                    "isSigner": true
+                },
+                {
+                    "name": "systemProgram",
+                    "isMut": false,
+                    "isSigner": false
+                }
+            ],
+            "args": [
+                {
+                    "name": "name",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "bookTable",
+            "accounts": [
+                {
+                    "name": "userStats",
+                    "isMut": true,
+                    "isSigner": false
+                },
+                {
+                    "name": "restaurant",
+                    "isMut": false,
+                    "isSigner": false
+                },
+                {
+                    "name": "user",
+                    "isMut": true,
+                    "isSigner": true
+                }
+            ],
+            "args": [
+                {
+                    "name": "dishIds",
+                    "type": {
+                        "vec": "publicKey"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "submitReview",
+            "accounts": [
+                {
+                    "name": "review",
+                    "isMut": true,
+                    "isSigner": false
+                },
+                {
+                    "name": "restaurant",
+                    "isMut": false,
+                    "isSigner": false
+                },
+                {
+                    "name": "user",
+                    "isMut": true,
+                    "isSigner": true
+                },
+                {
+                    "name": "systemProgram",
+                    "isMut": false,
+                    "isSigner": false
+                }
+            ],
+            "args": [
+                {
+                    "name": "rating",
+                    "type": "u8"
+                },
+                {
+                    "name": "review",
+                    "type": "string"
+                },
+                {
+                    "name": "confidenceLevel",
+                    "type": "u8"
+                }
+            ]
+        }
+    ],
+    "accounts": [
+        {
+            "name": "UserStats",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "user",
+                        "type": "publicKey"
+                    },
+                    {
+                        "name": "restaurant",
+                        "type": "publicKey"
+                    },
+                    {
+                        "name": "visitCount",
+                        "type": "u64"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "DishStats",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "user",
+                        "type": "publicKey"
+                    },
+                    {
+                        "name": "dish",
+                        "type": "publicKey"
+                    },
+                    {
+                        "name": "count",
+                        "type": "u64"
+                    },
+                    {
+                        "name": "nameLen",
+                        "type": "u32"
+                    },
+                    {
+                        "name": "nameData",
+                        "type": {
+                            "array": [
+                                "u8",
+                                50
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "Review",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "user",
+                        "type": "publicKey"
+                    },
+                    {
+                        "name": "restaurant",
+                        "type": "publicKey"
+                    },
+                    {
+                        "name": "rating",
+                        "type": "u8"
+                    },
+                    {
+                        "name": "reviewLen",
+                        "type": "u32"
+                    },
+                    {
+                        "name": "reviewData",
+                        "type": {
+                            "array": [
+                                "u8",
+                                200
+                            ]
+                        }
+                    },
+                    {
+                        "name": "confidenceLevel",
+                        "type": "u8"
+                    }
+                ]
+            }
+        }
+    ],
+    "errors": [
+        {
+            "code": 6000,
+            "name": "InvalidRating",
+            "msg": "Rating must be between 1 and 5"
+        },
+        {
+            "code": 6001,
+            "name": "ReviewAlreadyExists",
+            "msg": "You have already submitted a review for this restaurant."
+        },
+        {
+            "code": 6002,
+            "name": "InvalidConfidenceLevel",
+            "msg": "Confidence level must be between 1 and 10"
+        }
+    ]
+}

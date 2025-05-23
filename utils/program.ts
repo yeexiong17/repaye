@@ -1,4 +1,4 @@
-import { Connection, PublicKey, SystemProgram } from '@solana/web3.js';
+import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { AnchorProvider, Program, web3, ProgramError, Idl } from '@coral-xyz/anchor';
 import idl from '../idl/restaurant_booking.json';
 
@@ -95,49 +95,6 @@ export const findDishStatsPDA = async (
     );
 };
 
-// Initialize user stats
-export const initializeUserStats = async (
-    program: Program,
-    userPublicKey: PublicKey,
-    restaurantPublicKey: PublicKey
-) => {
-    if (!program) throw new Error('Program not initialized');
-
-    try {
-        // Find the PDA
-        const [userStatsPda] = await findUserStatsPDA(
-            userPublicKey,
-            restaurantPublicKey,
-            program.programId
-        );
-
-        console.log("Initializing user stats with PDA:", userStatsPda.toString());
-        console.log("User public key:", userPublicKey.toString());
-        console.log("Restaurant public key:", restaurantPublicKey.toString());
-
-        // Call the program
-        return await program.methods
-            .initializeUserStats()
-            .accounts({
-                userStats: userStatsPda,
-                user: userPublicKey,
-                restaurant: restaurantPublicKey,
-                systemProgram: SystemProgram.programId,
-            })
-            .rpc();
-    } catch (error) {
-        console.error("Error in initializeUserStats:", error);
-
-        // Check if the account already exists (which can be fine)
-        if (error.toString().includes("already in use")) {
-            console.log("User stats account already exists");
-            return "ACCOUNT_ALREADY_EXISTS";
-        }
-
-        throw error;
-    }
-};
-
 // Initialize dish stats
 export const initializeDishStats = async (
     program: Program,
@@ -166,44 +123,157 @@ export const initializeDishStats = async (
         .rpc();
 };
 
-// Book a table
+export interface DishToBook {
+    dishPublicKey: PublicKey;
+    dishName: string;
+}
+
+// Book a table - New version that bundles transactions and payment
 export const bookTable = async (
     program: Program,
     userPublicKey: PublicKey,
     restaurantPublicKey: PublicKey,
-    dishIds: PublicKey[],
-    dishStatsPdas: PublicKey[]
-) => {
+    dishesToBook: DishToBook[],
+    paymentAmountLamports: number,      // ADDED: Amount for payment transfer
+    restaurantPaymentWallet: PublicKey  // ADDED: Restaurant's wallet for payment
+): Promise<string> => { // Returns transaction signature
     if (!program) throw new Error('Program not initialized');
+    if (!dishesToBook || dishesToBook.length === 0) {
+        // It's valid to book a table without pre-selecting dishes,
+        // in which case dish-specific logic is skipped.
+        console.log("Booking table without pre-selected dishes.");
+    }
 
-    // Find the user stats PDA
-    const [userStatsPda] = await findUserStatsPDA(
+    const provider = program.provider as AnchorProvider;
+    const transaction = new web3.Transaction();
+    const instructions: TransactionInstruction[] = [];
+
+    // 0. PREPEND SystemProgram.transfer instruction for the payment
+    if (paymentAmountLamports > 0) {
+        instructions.push(
+            SystemProgram.transfer({
+                fromPubkey: userPublicKey, // User pays
+                toPubkey: restaurantPaymentWallet, // Restaurant receives payment
+                lamports: paymentAmountLamports,
+            })
+        );
+        console.log(`Added payment transfer of ${paymentAmountLamports} lamports to ${restaurantPaymentWallet.toBase58()} to transaction.`);
+    }
+
+    const dishStatsPdasForBookTable: PublicKey[] = [];
+    const dishIdsForBookTable: PublicKey[] = [];
+
+    // 1. Prepare InitializeDishStats instructions if needed for each dish
+    if (dishesToBook && dishesToBook.length > 0) {
+        for (const dish of dishesToBook) {
+            if (!dish.dishPublicKey || !dish.dishName) {
+                console.warn("Skipping dish with missing publicKey or name:", dish);
+                continue;
+            }
+            const [dishStatsPda, _bump] = await findDishStatsPDA(
+                userPublicKey,
+                dish.dishPublicKey,
+                program.programId
+            );
+            dishStatsPdasForBookTable.push(dishStatsPda);
+            dishIdsForBookTable.push(dish.dishPublicKey);
+
+            // Check if DishStats account exists
+            const accountInfo = await provider.connection.getAccountInfo(dishStatsPda);
+            if (!accountInfo || accountInfo.data.length === 0) {
+                console.log(`DishStats PDA ${dishStatsPda.toBase58()} for dish '${dish.dishName}' (PK: ${dish.dishPublicKey.toBase58()}) does not exist. Creating initialize instruction.`);
+                const initializeDishStatsIx = await program.methods
+                    .initializeDishStats(dish.dishName)
+                    .accounts({
+                        dishStats: dishStatsPda,
+                        user: userPublicKey,
+                        dish: dish.dishPublicKey,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .instruction();
+                instructions.push(initializeDishStatsIx);
+            } else {
+                console.log(`DishStats PDA ${dishStatsPda.toBase58()} for dish '${dish.dishName}' already exists.`);
+            }
+        }
+    }
+
+
+    // 2. Prepare BookTable instruction (which handles UserStats via init_if_needed)
+    const [userStatsPda, _userStatsBump] = await findUserStatsPDA(
         userPublicKey,
         restaurantPublicKey,
         program.programId
     );
 
-    // Create remaining accounts array for dish stats and dishes
-    const remainingAccounts: { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[] = [];
-
-    // Add dish stats and dish accounts
-    for (let i = 0; i < dishStatsPdas.length; i++) {
-        remainingAccounts.push(
-            { pubkey: dishStatsPdas[i], isWritable: true, isSigner: false },
-            { pubkey: dishIds[i], isWritable: false, isSigner: false }
+    const remainingAccountsForBookTable: { pubkey: PublicKey; isWritable: boolean; isSigner: boolean }[] = [];
+    // The smart contract iterates remaining_accounts by 2, using the first of each pair.
+    // So, we must pass pairs: (DishStatsPDA, corresponding DishPK)
+    for (let i = 0; i < dishStatsPdasForBookTable.length; i++) {
+        remainingAccountsForBookTable.push(
+            { pubkey: dishStatsPdasForBookTable[i], isWritable: true, isSigner: false }, // This is the DishStats PDA
+            { pubkey: dishIdsForBookTable[i], isWritable: false, isSigner: false }    // This is the original Dish PublicKey
         );
     }
 
-    // Call the program
-    return program.methods
-        .bookTable(dishIds)
+    console.log("Preparing bookTable instruction with UserStats PDA:", userStatsPda.toBase58());
+    if (dishIdsForBookTable.length > 0) {
+        console.log("Dish IDs for bookTable method arg:", dishIdsForBookTable.map(pk => pk.toBase58()));
+        console.log("Remaining accounts for bookTable (DishStats PDAs and Dish PKs):", remainingAccountsForBookTable.map(acc => ({ ...acc, pubkey: acc.pubkey.toBase58() })));
+    }
+
+
+    const bookTableIx = await program.methods
+        .bookTable(dishIdsForBookTable) // This is the Vec<Pubkey> argument for the instruction method
         .accounts({
             userStats: userStatsPda,
             restaurant: restaurantPublicKey,
             user: userPublicKey,
+            systemProgram: SystemProgram.programId, // Required for init_if_needed on userStats
         })
-        .remainingAccounts(remainingAccounts)
-        .rpc();
+        .remainingAccounts(remainingAccountsForBookTable) // These are the additional accounts for the instruction
+        .instruction();
+    instructions.push(bookTableIx);
+
+    // Add all instructions to the transaction
+    // Order: InitializeDishStats instructions first, then BookTable.
+    transaction.add(...instructions);
+
+    // 3. Send the single transaction
+    console.log(`Sending transaction with ${instructions.length} instructions.`);
+    if (instructions.length === 0) {
+        // This case should ideally not happen if bookTableIx is always added.
+        // However, if dishesToBook was empty and bookTableIx somehow wasn't added, this is a safeguard.
+        // Realistically, bookTableIx will always be present.
+        console.warn("No instructions to send. This might indicate an issue.");
+        throw new Error("No instructions prepared for the transaction.");
+    }
+
+    try {
+        // Ensure the provider's wallet is used as the fee payer and for signing.
+        transaction.feePayer = provider.wallet.publicKey;
+        transaction.recentBlockhash = (await provider.connection.getLatestBlockhash()).blockhash;
+
+        // The AnchorProvider's sendAndConfirm method handles signing with the provider's wallet.
+        const txSignature = await provider.sendAndConfirm(transaction, [], {
+            skipPreflight: false, // Set to true if you encounter issues with preflight, but generally false is safer.
+            commitment: 'confirmed', // Or 'processed' / 'finalized' depending on desired confirmation level
+        });
+        console.log("Single transaction successful with signature:", txSignature);
+        return txSignature;
+    } catch (error) {
+        console.error("Error sending/confirming bundled transaction:", error);
+        // Attempt to log more details from the error, similar to submitReview
+        if (error instanceof Error) {
+            console.error("Error name:", error.name);
+            console.error("Error message:", error.message);
+        }
+        const anyError = error as any;
+        if (anyError?.logs) {
+            console.error("Transaction logs:", anyError.logs.join('\\n'));
+        }
+        throw error; // Re-throw the error to be handled by the caller
+    }
 };
 
 // Fetch user data

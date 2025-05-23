@@ -6,7 +6,7 @@ import { LAMPORTS_PER_SOL, PublicKey, Transaction, SystemProgram, Keypair } from
 import Image from 'next/image';
 import { useRouter } from 'next/router';
 import SuccessMessageBox from './SuccessMessageBox';
-import { getProgram, getRestaurantPublicKey, findDishStatsPDA, bookTable, initializeDishStats } from '../utils/program';
+import { getProgram, getRestaurantPublicKey, bookTable, type DishToBook } from '../utils/program';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -152,190 +152,85 @@ export default function BookingModal({ isOpen, onClose, restaurant, onConfirm }:
   if (!isOpen) return null;
 
   const handlePayment = async () => {
-    if (!publicKey || !sendTransaction) {
-      setError('Please connect your wallet first');
+    if (!publicKey || !sendTransaction || !program || !anchorWallet) {
+      setError('Please connect your wallet and ensure the program is initialized.');
       return;
     }
 
     try {
       setIsProcessing(true);
       setError(null);
+      setTransactionSignature(null);
 
-      try {
-        new PublicKey(RESTAURANT_WALLET);
-      } catch (err) {
-        throw new Error('Invalid restaurant wallet address');
-      }
-
+      const restaurantPaymentWalletPk = new PublicKey(RESTAURANT_WALLET);
       const balance = await connection.getBalance(publicKey);
       const SOL_PRICE_USD = 100;
       const solAmount = priceBreakdown.total / SOL_PRICE_USD;
-      const requiredLamports = Math.floor(solAmount * LAMPORTS_PER_SOL);
+      const requiredLamportsForPayment = Math.floor(solAmount * LAMPORTS_PER_SOL);
 
-      if (balance < requiredLamports) {
-        throw new Error(`Insufficient balance. Required: ${solAmount.toFixed(4)} SOL`);
+      if (balance < requiredLamportsForPayment) {
+        throw new Error(`Insufficient SOL for payment. Required: ${solAmount.toFixed(4)} SOL`);
       }
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      const dishesToBook: DishToBook[] = [];
+      if (selectedDishes && selectedDishes.length > 0) {
+        for (const dishName of selectedDishes) {
+          const dishKeyPair = dishKeypairs.get(dishName);
+          if (!dishKeyPair) {
+            console.warn(`No keypair found for dish: ${dishName}. Skipping.`);
+            continue;
+          }
+          dishesToBook.push({
+            dishPublicKey: dishKeyPair.publicKey,
+            dishName: dishName,
+          });
+        }
+      }
 
-      const transaction = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: new PublicKey(RESTAURANT_WALLET),
-          lamports: requiredLamports,
-        })
+      console.log("Calling consolidated bookTable with payment and booking details...");
+      const signature = await bookTable(
+        program,
+        publicKey,
+        getRestaurantPublicKey(restaurant.id),
+        dishesToBook,
+        requiredLamportsForPayment,
+        restaurantPaymentWalletPk
       );
 
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = publicKey;
+      console.log("Single transaction successful (payment + booking logic), signature:", signature);
+      setTransactionSignature(signature);
 
-      const signature = await sendTransaction(transaction, connection);
+      onConfirm({
+        date: selectedDate,
+        time: selectedTime,
+        guests,
+        specialRequests,
+        selectedDishes,
+        totalPrice: priceBreakdown.total,
+        transactionSignature: signature,
+      });
 
-      try {
-        const confirmation = await Promise.race([
-          connection.confirmTransaction({
-            signature,
-            blockhash,
-            lastValidBlockHeight
-          }, 'confirmed'),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Transaction timeout')), 30000)
-          )
-        ]);
-
-        const confirmationError =
-          confirmation &&
-          typeof confirmation === 'object' &&
-          'value' in confirmation &&
-          confirmation.value &&
-          typeof confirmation.value === 'object' &&
-          'err' in confirmation.value &&
-          confirmation.value.err;
-
-        if (confirmationError) {
-          throw new Error('Transaction failed to confirm');
-        }
-
-        setTransactionSignature(signature);
-
-        // Now handle the Solana program booking part
-        const solanaBookingSuccessful = await handleSolanaBooking();
-
-        if (solanaBookingSuccessful) {
-          onConfirm({
-            date: selectedDate,
-            time: selectedTime,
-            guests,
-            specialRequests,
-            selectedDishes,
-            totalPrice: priceBreakdown.total,
-            transactionSignature: signature,
-          });
-
-          // Redirect to rating page to prompt for review
-          setTimeout(() => {
-            router.push(`/rating/${restaurant.id}?tx=${signature}&promptReview=true`);
-          }, 1000); // Shortened delay for quicker redirect to review
-        } else {
-          // If solanaBookingSuccessful is false, an error message should already be set by handleSolanaBooking
-          // We might not need to do anything extra here, or perhaps ensure a generic error if not already set.
-          if (!error) { // Check if 'error' state is not already set by handleSolanaBooking
-            setError("Failed to finalize booking on the Solana network. Payment was processed, but please contact support.");
-          }
-          // Do not proceed with success actions like onConfirm or redirecting to review page
-        }
-
-      } catch (confirmError: any) {
-        if (confirmError.message === 'Transaction timeout') {
-          setError(
-            `Transaction sent but confirmation pending. Please check the status using the Solana Explorer: ` +
-            `https://explorer.solana.com/tx/${signature}`
-          );
-
-          // We still call onConfirm here as the transaction was sent.
-          // However, we might not want to prompt for a review immediately if confirmation is pending.
-          // For now, let's keep the existing behavior of redirecting to bookings page.
-          setTimeout(() => {
-            router.push(`/bookings?tx=${signature}`);
-          }, 3000);
-        } else {
-          throw confirmError;
-        }
-      }
+      setTimeout(() => {
+        router.push(`/rating/${restaurant.id}?tx=${signature}&promptReview=true`);
+      }, 1000);
 
     } catch (err) {
-      console.error('Payment error:', err);
-      setError(`Payment failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleSolanaBooking = async () => {
-    if (!publicKey || !connection || !program) {
-      setError('Solana program not initialized or wallet not connected');
-      return;
-    }
-
-    try {
-      console.log("Processing Solana booking for restaurant:", restaurant.id);
-
-      // Get restaurant public key
-      const restaurantPublicKey = getRestaurantPublicKey(restaurant.id);
-
-      // Process each selected dish
-      const dishPublicKeys: PublicKey[] = [];
-      const dishStatsPdas: PublicKey[] = [];
-
-      // Initialize each dish stats if needed and collect public keys
-      for (const dishName of selectedDishes) {
-        const dishKeyPair = dishKeypairs.get(dishName);
-        if (!dishKeyPair) continue;
-
-        const dishPublicKey = dishKeyPair.publicKey;
-        dishPublicKeys.push(dishPublicKey);
-
-        // Find the PDA for this dish
-        const [dishStatsPda] = await findDishStatsPDA(
-          publicKey,
-          dishPublicKey,
-          program.programId
-        );
-        dishStatsPdas.push(dishStatsPda);
-
-        // Initialize dish stats (this would create the account on chain)
-        try {
-          await initializeDishStats(
-            program,
-            publicKey,
-            dishPublicKey,
-            dishName
-          );
-          console.log(`Initialized dish stats for "${dishName}"`);
-        } catch (e) {
-          console.log(`Dish stats may already exist for "${dishName}"`, e);
-          // Continue even if initialization fails (might already exist)
+      console.error('Unified payment and booking error:', err);
+      let errorMessage = "Transaction failed.";
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      const anyError = err as any;
+      if (anyError?.logs) {
+        console.error("Transaction logs:", anyError.logs.join('\n'));
+        const programErrorMatch = anyError.logs.join('\n').match(/Program log: AnchorError: (.*)/);
+        if (programErrorMatch && programErrorMatch[1]) {
+          errorMessage = `On-chain program error: ${programErrorMatch[1]}`;
         }
       }
-
-      // Book the table with all selected dishes
-      if (dishPublicKeys.length > 0) {
-        const bookingTx = await bookTable(
-          program,
-          publicKey,
-          restaurantPublicKey,
-          dishPublicKeys,
-          dishStatsPdas
-        );
-
-        console.log("Successfully booked table on chain, tx:", bookingTx);
-      }
-
-      return true; // Indicate success
-    } catch (error) {
-      console.error("Error in Solana booking:", error);
-      setError(`Solana booking error: ${error instanceof Error ? error.message : String(error)}`);
-      return false; // Indicate failure
+      setError(errorMessage);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -352,7 +247,6 @@ export default function BookingModal({ isOpen, onClose, restaurant, onConfirm }:
       return;
     }
 
-    // All validations passed, proceed with booking
     await handlePayment();
   };
 

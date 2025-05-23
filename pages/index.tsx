@@ -216,50 +216,6 @@ export default function RatingApp() {
     }
   };
 
-  // Initialize user stats for a restaurant
-  const handleInitializeUserStats = async (restaurantId: number) => {
-    if (!publicKey || !program) return false;
-
-    setBookingInProgress(true);
-
-    try {
-      // Create a deterministic PublicKey from the restaurant ID
-      const restaurantPublicKey = getRestaurantPublicKey(restaurantId);
-      console.log(`Initializing stats for restaurant: ${restaurantPublicKey.toString()}`);
-
-      // Import the function from program module
-      const { initializeUserStats } = require('../utils/program');
-
-      // Call the function to initialize user stats
-      try {
-        const tx = await initializeUserStats(program, publicKey, restaurantPublicKey);
-        console.log("User stats initialized successfully:", tx);
-
-        // Refresh user data
-        await getUserData();
-
-        return true;
-      } catch (e) {
-        console.error("Specific error initializing user stats:", e);
-
-        // Check if this is an "already initialized" error (which is actually okay)
-        const errorMessage = e.toString();
-        if (errorMessage.includes("already in use") || errorMessage.includes("already initialized")) {
-          console.log("User stats already initialized, which is fine");
-          return true; // Still return success in this case
-        }
-
-        throw new Error(`Failed to initialize user stats: ${e.message || e}`);
-      }
-    } catch (error) {
-      console.error("Error initializing user stats:", error);
-      alert(`Error initializing user stats: ${error.message || "Unknown error"}`);
-      return false;
-    } finally {
-      setBookingInProgress(false);
-    }
-  };
-
   const handleBooking = async (restaurant: typeof restaurants[0]) => {
     if (!connected) {
       alert('Please connect your wallet to make a booking');
@@ -271,37 +227,16 @@ export default function RatingApp() {
       return;
     }
 
-    try {
-      setBookingInProgress(true);
+    // The logic for checking and initializing UserStats is now removed.
+    // The on-chain bookTable instruction (called via BookingModal) handles UserStats creation with init_if_needed.
 
-      // Check if we need to initialize user stats first
-      if (publicKey) {
-        // Create a deterministic PublicKey from the restaurant ID
-        const restaurantIdString = `restaurant-${restaurant.id}`;
-        const restaurantIdBuffer = Buffer.from(restaurantIdString);
-        const restaurantPublicKey = new PublicKey(restaurantIdBuffer);
-        const restaurantKey = restaurantPublicKey.toBase58();
-
-        // If we don't have user data yet, or we don't have data for this restaurant,
-        // initialize user stats first
-        if (!userData || !userData.restaurants[restaurantKey]) {
-          console.log("Initializing user stats before booking");
-          const initialized = await handleInitializeUserStats(restaurant.id);
-          if (!initialized) {
-            console.error("Failed to initialize user stats");
-            return;
-          }
-        }
-      }
-
-      setSelectedRestaurant(restaurant);
-      setIsBookingModalOpen(true);
-    } catch (error) {
-      console.error("Error during booking process:", error);
-      alert(`Error during booking process: ${error.message || "Unknown error"}`);
-    } finally {
-      setBookingInProgress(false);
-    }
+    // Directly proceed to open the modal
+    setSelectedRestaurant(restaurant);
+    setIsBookingModalOpen(true);
+    // Note: setBookingInProgress was previously set here and in handleInitializeUserStats.
+    // If you still need a loading state specifically for the opening of the modal before interaction,
+    // you might set it here and unset it when the modal effectively opens or on its onClose.
+    // For now, it's removed as the primary heavy lifting that used it is gone from this function.
   };
 
   const handleConfirmBooking = (bookingDetails: {

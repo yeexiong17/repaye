@@ -25,13 +25,13 @@ export default function Layout({ children }: LayoutProps) {
                                 <Link href="/" className="flex items-center">
                                     <Image
                                         src="/solana-logo.svg"
-                                        alt="SolDine Logo"
+                                        alt="Repaye Logo"
                                         width={30}
                                         height={30}
                                         className="mr-2"
                                     />
                                     <span className="text-xl font-bold bg-gradient-to-r from-purple-600 to-blue-500 bg-clip-text text-transparent">
-                                        SolDine
+
                                     </span>
                                 </Link>
                             </div>
@@ -105,12 +105,12 @@ export default function Layout({ children }: LayoutProps) {
                         <div className="flex items-center mb-4 md:mb-0">
                             <Image
                                 src="/solana-logo.svg"
-                                alt="SolDine Logo"
+                                alt="Repaye Logo"
                                 width={24}
                                 height={24}
                                 className="mr-2"
                             />
-                            <span className="font-semibold text-gray-800">SolDine</span>
+                            <span className="font-semibold text-gray-800">Repaye</span>
                             <span className="text-gray-500 ml-2 text-sm">© {new Date().getFullYear()}</span>
                         </div>
                         <div className="flex space-x-6">

@@ -273,7 +273,7 @@ export default function RatingApp() {
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
       <Head>
-        <title>SolDine - Restaurant Booking & Rating</title>
+        <title>Repaye - Restaurant Booking & Rating</title>
         <meta name="description" content="Book tables and rate restaurants on Solana" />
         <link rel="icon" href="/favicon.ico" />
         <style jsx global>{`

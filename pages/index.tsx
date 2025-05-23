@@ -313,36 +313,23 @@ export default function RatingApp() {
     totalPrice: number;
     transactionSignature?: string;
   }) => {
-    // This is called after the booking is confirmed in the modal
-    console.log('Booking confirmed:', {
+    console.log('Booking confirmed in parent (index.tsx):', {
       restaurant: selectedRestaurant?.name,
       ...bookingDetails,
     });
 
-    // Update local state
     if (bookingDetails.transactionSignature) {
-      // Refresh user data to show the new booking
-      getUserData();
+      getUserData(); // Refresh user data, this is good
     }
 
-    const message = [
-      `Booking confirmed at ${selectedRestaurant?.name}`,
-      `Date: ${format(bookingDetails.date, 'MMMM d, yyyy')}`,
-      `Time: ${bookingDetails.time}`,
-      `Guests: ${bookingDetails.guests}`,
-      `Selected Dishes: ${bookingDetails.selectedDishes.join(', ')}`,
-      `Total Price: $${bookingDetails.totalPrice.toFixed(2)}`,
-      bookingDetails.transactionSignature ?
-        `Transaction: https://explorer.solana.com/tx/${bookingDetails.transactionSignature}?cluster=devnet` :
-        'No transaction signature'
-    ].join('\n');
+    // DO NOT close the modal here. BookingModal will show SuccessMessageBox
+    // and then handle its own closing via redirect or SuccessMessageBox's onClose prop.
+    // setIsBookingModalOpen(false); // REMOVED
+    // setSelectedRestaurant(null); // REMOVED (or move to BookingModal's main onClose if needed after redirect)
 
-    // Close the modal
-    setIsBookingModalOpen(false);
-    setSelectedRestaurant(null);
-
-    // Show a success message
-    alert(message);
+    // DO NOT show an alert here. SuccessMessageBox in BookingModal will handle UI.
+    // const message = [ ... ].join('\n');
+    // alert(message); // REMOVED
   };
 
   // If not mounted yet, don't render the page

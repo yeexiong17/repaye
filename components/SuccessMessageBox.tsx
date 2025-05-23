@@ -23,28 +23,28 @@ export default function SuccessMessageBox({
   onClose,
 }: SuccessMessageBoxProps) {
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[60]">
-      <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4 shadow-2xl transform transition-all">
-        <div className="flex justify-end mb-4">
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[60] px-4">
+      <div className="bg-white rounded-xl p-6 max-w-md w-full mx-auto shadow-2xl transform transition-all max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-end mb-2">
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            className="p-1.5 hover:bg-gray-100 rounded-full transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-            <CheckCircle2 className="w-12 h-12 text-green-500" />
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+            <CheckCircle2 className="w-10 h-10 text-green-500" />
           </div>
-          <h3 className="text-3xl font-bold text-gray-900 mb-3">Booking Successful!</h3>
-          <p className="text-gray-600 text-lg">Your booking has been confirmed.</p>
+          <h3 className="text-2xl font-bold text-gray-900 mb-2">Booking Successful!</h3>
+          <p className="text-gray-600 text-base">Your booking has been confirmed.</p>
         </div>
 
-        <div className="bg-gray-50 rounded-xl p-6 mb-6 border border-gray-100">
-          <h4 className="text-xl font-semibold mb-4 text-gray-800">Transaction Details</h4>
-          <div className="space-y-3 text-sm">
+        <div className="bg-gray-50 rounded-lg p-4 mb-4 border border-gray-100">
+          <h4 className="text-lg font-semibold mb-3 text-gray-800">Transaction Details</h4>
+          <div className="space-y-2 text-sm">
             <div className="flex justify-between items-center">
               <span className="text-gray-600">Transaction ID:</span>
               <div className="flex items-center gap-2">
@@ -76,9 +76,9 @@ export default function SuccessMessageBox({
           </div>
         </div>
 
-        <div className="bg-blue-50 rounded-xl p-6 mb-6 border border-blue-100">
-          <h4 className="text-xl font-semibold mb-4 text-gray-800">Booking Details</h4>
-          <div className="space-y-3 text-sm">
+        <div className="bg-blue-50 rounded-lg p-4 mb-4 border border-blue-100">
+          <h4 className="text-lg font-semibold mb-3 text-gray-800">Booking Details</h4>
+          <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-600">Restaurant:</span>
               <span className="font-medium">{restaurant.name}</span>
@@ -106,13 +106,13 @@ export default function SuccessMessageBox({
           </div>
         </div>
 
-        <div className="text-center bg-gray-50 rounded-xl p-4 border border-gray-100">
-          <div className="flex items-center justify-center gap-2 text-gray-600 mb-2">
+        <div className="text-center bg-gray-50 rounded-lg p-3 border border-gray-100">
+          <div className="flex items-center justify-center gap-2 text-gray-600 mb-1">
             <Loader2 className="w-4 h-4 animate-spin" />
-            <span className="font-medium">Waiting to navigate to the rating page…</span>
+            <span className="font-medium text-sm">Navigating to rating page…</span>
           </div>
-          <p className="text-sm text-gray-500">
-            You will be redirected to the rating page in a few seconds.
+          <p className="text-xs text-gray-500">
+            You will be redirected in a few seconds.
           </p>
         </div>
       </div>

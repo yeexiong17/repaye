@@ -98,6 +98,14 @@ export default function BookingModal({ isOpen, onClose, restaurant, onConfirm }:
   );
   const [program, setProgram] = useState<any>(null);
 
+  // useEffect to log transactionSignature changes
+  useEffect(() => {
+    console.log("useEffect: transactionSignature CHANGED to:", transactionSignature);
+  }, [transactionSignature]);
+
+  // At the top of the component function body, for re-render logging
+  console.log("BookingModal RENDER. transactionSignature:", transactionSignature, "isProcessing:", isProcessing, "isOpen:", isOpen);
+
   // Initialize Solana program
   useEffect(() => {
     if (publicKey && connection && anchorWallet) {
@@ -152,6 +160,8 @@ export default function BookingModal({ isOpen, onClose, restaurant, onConfirm }:
   if (!isOpen) return null;
 
   const handlePayment = async () => {
+    console.log("handlePayment START. Initial transactionSignature:", transactionSignature);
+
     if (!publicKey || !sendTransaction || !program || !anchorWallet) {
       setError('Please connect your wallet and ensure the program is initialized.');
       return;
@@ -161,6 +171,7 @@ export default function BookingModal({ isOpen, onClose, restaurant, onConfirm }:
       setIsProcessing(true);
       setError(null);
       setTransactionSignature(null);
+      console.log("handlePayment TRY_BLOCK_START. transactionSignature (after explicit null):");
 
       const restaurantPaymentWalletPk = new PublicKey(RESTAURANT_WALLET);
       const balance = await connection.getBalance(publicKey);
@@ -197,8 +208,9 @@ export default function BookingModal({ isOpen, onClose, restaurant, onConfirm }:
         restaurantPaymentWalletPk
       );
 
-      console.log("Single transaction successful (payment + booking logic), signature:", signature);
+      console.log("handlePayment bookTable returned. New signature:", signature, "Type:", typeof signature);
       setTransactionSignature(signature);
+      console.log("handlePayment AFTER setTransactionSignature(new). Expect SuccessModal to show.");
 
       onConfirm({
         date: selectedDate,
@@ -212,7 +224,7 @@ export default function BookingModal({ isOpen, onClose, restaurant, onConfirm }:
 
       setTimeout(() => {
         router.push(`/rating/${restaurant.id}?tx=${signature}&promptReview=true`);
-      }, 1000);
+      }, 5000);
 
     } catch (err) {
       console.error('Unified payment and booking error:', err);
